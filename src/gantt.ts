@@ -165,8 +165,10 @@ module powerbi.extensibility.visual {
         export const ChartLine: ClassAndSelector = createClassAndSelector("chart-line");
         export const Body: ClassAndSelector = createClassAndSelector("gantt-body");
         export const AxisGroup: ClassAndSelector = createClassAndSelector("axis");
+        export const zAxisGroup: ClassAndSelector = createClassAndSelector("zaxis");
         export const Domain: ClassAndSelector = createClassAndSelector("domain");
         export const AxisTick: ClassAndSelector = createClassAndSelector("tick");
+        export const zAxisTick: ClassAndSelector = createClassAndSelector("ztick");
         export const Tasks: ClassAndSelector = createClassAndSelector("tasks");
         export const TaskGroup: ClassAndSelector = createClassAndSelector("task-group");
         export const SingleTask: ClassAndSelector = createClassAndSelector("task");
@@ -219,6 +221,7 @@ module powerbi.extensibility.visual {
 
         public static DefaultValues = {
             AxisTickSize: 6,
+            zAxisTickSize: 6,
             ProgressBarHeight: 4,
             ResourceWidth: 100,
             TaskColor: "#00B099",
@@ -273,6 +276,7 @@ module powerbi.extensibility.visual {
         private timeScale: timeScale<any, any>;
         private collapseAllGroup: Selection<any>;
         private axisGroup: Selection<any>;
+        private zaxisGroup: Selection<any>;
         private chartGroup: Selection<any>;
         private taskGroup: Selection<any>;
         private lineGroup: Selection<any>;
@@ -357,6 +361,17 @@ module powerbi.extensibility.visual {
                 .attr("height", "40px")
                 .attr("fill", axisBackgroundColor);
 
+            // create axis container
+            this.zaxisGroup = this.ganttSvg
+                .append("g")
+                .classed(Selectors.zAxisGroup.className, true);
+            this.zaxisGroup
+                .append("rect")
+                .attr("width", "100%")
+                .attr("y", "-20")
+                .attr("height", "40px")
+                .attr("fill", axisBackgroundColor);
+
             // create task lines container
             this.lineGroup = this.ganttSvg
                 .append("g")
@@ -368,7 +383,7 @@ module powerbi.extensibility.visual {
                 .attr("height", "100%")
                 .attr("width", "0")
                 .attr("fill", axisBackgroundColor)
-                .attr("y", this.margin.top);
+                .attr("y", this.margin.top + 100);
 
             this.collapseAllGroup = this.lineGroup
                 .append("g")
@@ -394,11 +409,13 @@ module powerbi.extensibility.visual {
                     const taskLabelsWidth: number = self.viewModel.settings.taskLabels.show
                         ? self.viewModel.settings.taskLabels.width
                         : 0;
-                    self.axisGroup
-                        .attr("transform", SVGUtil.translate(taskLabelsWidth + self.margin.left, Gantt.TaskLabelsMarginTop + this.scrollTop));
-                    self.lineGroup
-                        .attr("transform", SVGUtil.translate(this.scrollLeft, 0))
-                        .attr("height", 20);
+                    // self.axisGroup
+                    //     .attr("transform", SVGUtil.translate(taskLabelsWidth + self.margin.left, Gantt.TaskLabelsMarginTop + this.scrollTop));
+                    // self.zaxisGroup
+                    //     .attr("transform", SVGUtil.translate(taskLabelsWidth + self.margin.left, Gantt.TaskLabelsMarginTop + this.scrollTop));
+                    // self.lineGroup
+                    //     .attr("transform", SVGUtil.translate(this.scrollLeft, 0))
+                    //     .attr("height", 20);
                 }
             }, false);
         }
@@ -426,6 +443,14 @@ module powerbi.extensibility.visual {
                 .remove();
 
             this.axisGroup
+                .selectAll(Selectors.Domain.selectorName)
+                .remove();
+
+            this.zaxisGroup
+                .selectAll(Selectors.zAxisTick.selectorName)
+                .remove();
+
+            this.zaxisGroup
                 .selectAll(Selectors.Domain.selectorName)
                 .remove();
 
@@ -1251,7 +1276,7 @@ module powerbi.extensibility.visual {
             let settings = this.viewModel.settings;
 
             let dateTypeMilliseconds: number = Gantt.getDateType(settings.dateType.type);
-            let ticks: number = Math.ceil(Math.round(endDate.valueOf() - startDate.valueOf()) / dateTypeMilliseconds);
+            let ticks: number = Math.ceil(Math.round(endDate.valueOf() - startDate.valueOf())  / dateTypeMilliseconds);
             ticks = ticks < 2 ? 2 : ticks;
             let axisLength: number = ticks * Gantt.DefaultTicksLength;
 
@@ -1263,11 +1288,24 @@ module powerbi.extensibility.visual {
                 width: axisLength
             };
 
+            let zticks: number = Math.ceil(Math.round(endDate.valueOf() - startDate.valueOf()) / dateTypeMilliseconds);
+            zticks = zticks < 2 ? 2 : ticks;
+            let zaxisLength: number = ticks * Gantt.DefaultTicksLength;
+
+            this.setDimension(groupedTasks, zaxisLength, settings);
+
+            let zviewportIn: IViewport = {
+                height: this.viewport.height,
+                width: zaxisLength
+            };
+
             let xAxisProperties: IAxisProperties = this.calculateAxes(viewportIn, this.textProperties, startDate, endDate, ticks, false);
+            let zAxisProperties: IAxisProperties = this.calculatezAxes(zviewportIn, this.textProperties, startDate, endDate, zticks, false);
             this.timeScale = <timeScale<Date, Date>>xAxisProperties.scale;
 
             this.collapsedTasks = JSON.parse(settings.collapsedTasks.list);
             this.renderAxis(xAxisProperties);
+            this.renderzAxis(zAxisProperties);
             this.renderTasks(groupedTasks);
             this.updateTaskLabels(groupedTasks, settings.taskLabels.width);
             this.updateElementsPositions(this.margin);
@@ -1383,6 +1421,54 @@ module powerbi.extensibility.visual {
             return axes;
         }
 
+        private calculatezAxes(
+            viewportIn: IViewport,
+            textProperties: TextProperties,
+            startDate: Date,
+            endDate: Date,
+            ticksCount: number,
+            scrollbarVisible: boolean): IAxisProperties {
+
+            let dataTypeDatetime: ValueType = ValueType.fromPrimitiveTypeAndCategory(PrimitiveType.Date);
+            let category: DataViewMetadataColumn = {
+                displayName: this.localizationManager.getDisplayName("Role_StartDate"),
+                queryName: GanttRoles.StartDate,
+                type: dataTypeDatetime,
+                index: 0
+            };
+
+            let visualOptions: GanttCalculateScaleAndDomainOptions = {
+                viewport: viewportIn,
+                margin: this.margin,
+                forcedXDomain: [startDate, endDate],
+                forceMerge: false,
+                showCategoryAxisLabel: false,
+                showValueAxisLabel: false,
+                categoryAxisScaleType: axisScale.linear,
+                valueAxisScaleType: null,
+                valueAxisDisplayUnits: 0,
+                categoryAxisDisplayUnits: 0,
+                trimOrdinalDataOnOverflow: false,
+                forcedTickCount: ticksCount
+            };
+
+            const width: number = viewportIn.width;
+            let axes: IAxisProperties = this.calculatezAxesProperties(viewportIn, visualOptions, category);
+            axes.willLabelsFit = AxisHelper.LabelLayoutStrategy.willLabelsFit(
+                axes,
+                width,
+                textMeasurementService.measureSvgTextWidth,
+                textProperties);
+
+            // If labels do not fit and we are not scrolling, try word breaking
+            axes.willLabelsWordBreak = (!axes.willLabelsFit && !scrollbarVisible) && AxisHelper.LabelLayoutStrategy.willLabelsWordBreak(
+                axes, this.margin, width, textMeasurementService.measureSvgTextWidth,
+                textMeasurementService.estimateSvgTextHeight, textMeasurementService.getTailoredTextOrDefault,
+                textProperties);
+
+            return axes;
+        }
+
         private calculateAxesProperties(
             viewportIn: IViewport,
             options: GanttCalculateScaleAndDomainOptions,
@@ -1406,6 +1492,41 @@ module powerbi.extensibility.visual {
                 useTickIntervalForDisplayUnits: true,
                 isCategoryAxis: true,
                 getValueFn: (index) => {
+                    debugger;
+                    return xAxisDateFormatter.format(new Date(index));
+                },
+                scaleType: options.categoryAxisScaleType,
+                axisDisplayUnits: options.categoryAxisDisplayUnits,
+            });
+
+            xAxisProperties.axisLabel = metaDataColumn.displayName;
+            return xAxisProperties;
+        }
+
+        private calculatezAxesProperties(
+            viewportIn: IViewport,
+            options: GanttCalculateScaleAndDomainOptions,
+            metaDataColumn: DataViewMetadataColumn): IAxisProperties {
+
+            const dateType: DateTypes = this.viewModel.settings.dateType.type;
+            const cultureSelector: string = this.host.locale;
+            let xAxisDateFormatter: IValueFormatter = ValueFormatter.create({
+                format: Gantt.DefaultValues.DateFormatStrings[dateType],
+                cultureSelector
+            });
+            let xAxisProperties: IAxisProperties = AxisHelper.createAxis({
+                pixelSpan: viewportIn.width,
+                dataDomain: options.forcedXDomain,
+                metaDataColumn: metaDataColumn,
+                formatString: Gantt.DefaultValues.DateFormatStrings[dateType],
+                outerPadding: 0,
+                isScalar: true,
+                isVertical: false,
+                forcedTickCount: options.forcedTickCount,
+                useTickIntervalForDisplayUnits: true,
+                isCategoryAxis: true,
+                getValueFn: (index) => {
+                    index = index - 5*60*60*1000
                     return xAxisDateFormatter.format(new Date(index));
                 },
                 scaleType: options.categoryAxisScaleType,
@@ -1479,6 +1600,30 @@ module powerbi.extensibility.visual {
                 .style("stroke", (timestamp) => this.setTickColor(timestamp, axisColor)); // ticks
 
             this.axisGroup
+                .selectAll(".tick text")
+                .style("fill", (timestamp) => this.setTickColor(timestamp, axisTextColor)); // text
+        }
+
+        private renderzAxis(zAxisProperties: IAxisProperties, duration: number = Gantt.DefaultDuration): void {
+            const axisColor: string = this.viewModel.settings.dateType.axisColor;
+            const axisTextColor: string = this.viewModel.settings.dateType.axisTextColor;
+            let zAxis: d3.svg.Axis = zAxisProperties.axis;
+            zAxis.orient("top");
+
+            this.zaxisGroup
+                .transition()
+                .duration(duration)
+                .call(zAxis);
+
+            this.zaxisGroup
+                .selectAll("path")
+                .style("stroke", axisColor); // line
+
+            this.zaxisGroup
+                .selectAll(".tick line")
+                .style("stroke", (timestamp) => this.setTickColor(timestamp, axisColor)); // ticks
+
+            this.zaxisGroup
                 .selectAll(".tick text")
                 .style("fill", (timestamp) => this.setTickColor(timestamp, axisTextColor)); // text
         }
@@ -2231,15 +2376,18 @@ module powerbi.extensibility.visual {
 
             let translateXValue = taskLabelsWidth + margin.left;
             this.chartGroup
-                .attr("transform", SVGUtil.translate(translateXValue, margin.top));
+                .attr("transform", SVGUtil.translate(translateXValue, margin.top + 70));
 
             let translateYValue = Gantt.TaskLabelsMarginTop + (this.ganttDiv.node() as SVGSVGElement).scrollTop;
             this.axisGroup
-                .attr("transform", SVGUtil.translate(translateXValue, translateYValue));
+                .attr("transform", SVGUtil.translate(translateXValue, translateYValue + 50));
+
+            this.zaxisGroup
+                .attr("transform", SVGUtil.translate(translateXValue, translateYValue+20));
 
             translateXValue = (this.ganttDiv.node() as SVGSVGElement).scrollLeft;
             this.lineGroup
-                .attr("transform", SVGUtil.translate(translateXValue, 0));
+                .attr("transform", SVGUtil.translate(translateXValue, 70));
             this.collapseAllGroup
                 .attr("transform", SVGUtil.translate(0, margin.top / 4));
         }
